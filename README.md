@@ -6,7 +6,9 @@ A remote service that solves reCAPTCHA v2 challenges by transcribing their audio
 
 ## Current Status
 
-> **Phases 1–4 complete. Solver is functional.** Architecture, browser automation, Whisper transcription, retry logic, and HTTP API are all implemented. Next: Phase 5 (operability) and Phase 6 (test/demo module).
+> **Phases 1–4 and 6 complete.** Solver, HTTP API, and demo module are all implemented. Phase 5 (operability) is pending but not blocking.
+>
+> **Active bug:** the solver fails with `"Timeout waiting for reCAPTCHA elements"` after opening the audio challenge. Likely cause: the `audio#audio-source` selector in `_download_audio` does not match the current reCAPTCHA bframe DOM. Next step: inspect the bframe in a visible browser (`BROWSER_HEADLESS=false`) to find the correct selector.
 
 ---
 
@@ -24,6 +26,9 @@ server/               — HTTP API layer. Wraps the solver with FastAPI.
   schemas.py          — Pydantic request/response models
   auth.py             — API key dependency
   config.py           — Environment variable loading
+
+demo/                 — End-to-end demo. Requires the server to be running.
+  __main__.py         — Opens a visible browser, reads sitekey, delegates to server, injects token
 ```
 
 The `solver/` package has no dependency on `server/`. It can be used standalone, imported as a library, or called via the CLI without running the HTTP server.
@@ -55,6 +60,13 @@ Optional flags: `--proxy http://host:port`, `--proxy-user`, `--proxy-password`, 
 uvicorn server.main:app
 ```
 
+To run with a visible browser (useful for debugging the captcha flow):
+
+```bash
+$env:BROWSER_HEADLESS="false"; uvicorn server.main:app  # PowerShell
+BROWSER_HEADLESS=false uvicorn server.main:app          # bash
+```
+
 Then send requests:
 
 ```bash
@@ -62,6 +74,16 @@ curl -X POST http://localhost:8000/solve \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com", "sitekey": "YOUR_SITEKEY"}'
 ```
+
+### As a demo (end-to-end visible test)
+
+With the server running in another terminal:
+
+```bash
+python -m demo --url https://www.google.com/recaptcha/api2/demo
+```
+
+Optional flags: `--server http://localhost:8000`, `--api-key YOUR_KEY`
 
 ---
 
@@ -244,11 +266,12 @@ Requests must include an API key in the `X-API-Key` header. Authentication is co
 
 All runtime configuration is done via environment variables.
 
-| Variable       | Default  | Description                                                              |
-|----------------|----------|--------------------------------------------------------------------------|
-| `WHISPER_MODEL`| `small`  | Whisper model to use. Options: `tiny`, `base`, `small`, `medium`, `large` |
-| `API_KEY`      | *(unset)*| If set, all requests must include `X-API-Key: {value}` header            |
-| `LOG_LEVEL`    | `info`   | Logging level. Options: `debug`, `info`, `warning`, `error`              |
+| Variable           | Default  | Description                                                              |
+|--------------------|----------|--------------------------------------------------------------------------|
+| `WHISPER_MODEL`    | `small`  | Whisper model to use. Options: `tiny`, `base`, `small`, `medium`, `large` |
+| `API_KEY`          | *(unset)*| If set, all requests must include `X-API-Key: {value}` header            |
+| `LOG_LEVEL`        | `info`   | Logging level. Options: `debug`, `info`, `warning`, `error`              |
+| `BROWSER_HEADLESS` | `true`   | Set to `false` to run the solver's Chromium in visible mode (for debugging) |
 
 **Whisper model tradeoffs (for reCAPTCHA audio):**
 
