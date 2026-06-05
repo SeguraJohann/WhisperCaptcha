@@ -6,9 +6,9 @@ A remote service that solves reCAPTCHA v2 challenges by transcribing their audio
 
 ## Current Status
 
-> **Phases 1–4 and 6 complete.** Solver, HTTP API, and demo module are all implemented. Phase 5 (operability) is pending but not blocking.
+> **Phases 1–4 and 6 complete.** Solver, HTTP API, and demo module are all implemented and working end-to-end. Phase 5 (operability) is pending but not blocking.
 >
-> **Active bug:** the solver fails with `"Timeout waiting for reCAPTCHA elements"` after opening the audio challenge. Likely cause: the `audio#audio-source` selector in `_download_audio` does not match the current reCAPTCHA bframe DOM. Next step: inspect the bframe in a visible browser (`BROWSER_HEADLESS=false`) to find the correct selector.
+> **Known limitation:** reCAPTCHA's trust score is low for fresh browser contexts with no Google cookie history. The solver works reliably, but Google may present visual challenges or block audio in some runs. Next improvement: persistent browser context with accumulated session state to raise the trust score.
 
 ---
 
@@ -329,6 +329,7 @@ All runtime configuration is done via environment variables.
 - [x] Navigate and wait for anchor iframe to be ready.
 - [x] Switch to bframe and trigger audio challenge.
 - [x] Extract `.mp3` URL from bframe DOM and download it.
+- [x] Browser fingerprint hardening: real Chrome user-agent, `navigator.webdriver` removal, `--disable-blink-features=AutomationControlled`.
 
 > Note: The `v` (widget version) and `co` (origin) parameters are derived automatically by the reCAPTCHA script when it loads in the browser. No manual extraction needed with the direct widget loading approach.
 

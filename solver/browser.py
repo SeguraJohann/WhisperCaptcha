@@ -7,7 +7,10 @@ _browser: Browser | None = None
 async def start(headless: bool = True) -> None:
     global _playwright, _browser
     _playwright = await async_playwright().start()
-    _browser = await _playwright.chromium.launch(headless=headless)
+    _browser = await _playwright.chromium.launch(
+        headless=headless,
+        args=["--disable-blink-features=AutomationControlled"],
+    )
 
 
 async def stop() -> None:

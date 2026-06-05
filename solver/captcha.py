@@ -1,3 +1,6 @@
+import asyncio
+import logging
+
 from playwright.async_api import BrowserContext, Page
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
@@ -6,6 +9,8 @@ from solver.browser import get_browser
 
 MAX_ATTEMPTS = 3
 TOKEN_TIMEOUT_MS = 10_000
+
+log = logging.getLogger(__name__)
 
 
 class CaptchaError(Exception):
@@ -23,13 +28,18 @@ async def solve(
     try:
         page = await context.new_page()
         await _load_captcha_page(page, url, sitekey)
+        log.debug("Captcha page loaded")
         await _open_audio_challenge(page)
+        log.debug("Audio challenge opened")
         for attempt in range(MAX_ATTEMPTS):
+            log.debug("Attempt %d: downloading audio", attempt + 1)
             audio = await _download_audio(page)
             answer = await transcriber.transcribe(audio)
+            log.debug("Transcription: %r", answer)
             token = await _submit_answer(page, answer)
             if token:
                 return token
+            log.debug("Attempt %d rejected, retrying", attempt + 1)
             if attempt < MAX_ATTEMPTS - 1:
                 await _reload_audio(page)
         raise CaptchaError("Failed to solve after maximum attempts")
@@ -39,19 +49,30 @@ async def solve(
         await context.close()
 
 
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/148.0.7778.96 Safari/537.36"
+)
+
+
 async def _create_context(
     proxy: str | None,
     proxy_user: str | None,
     proxy_password: str | None,
 ) -> BrowserContext:
     browser = get_browser()
-    if not proxy:
-        return await browser.new_context()
-    proxy_config: dict = {"server": proxy}
-    if proxy_user:
-        proxy_config["username"] = proxy_user
-        proxy_config["password"] = proxy_password or ""
-    return await browser.new_context(proxy=proxy_config)
+    kwargs: dict = {"user_agent": USER_AGENT}
+    if proxy:
+        kwargs["proxy"] = {"server": proxy}
+        if proxy_user:
+            kwargs["proxy"]["username"] = proxy_user
+            kwargs["proxy"]["password"] = proxy_password or ""
+    context = await browser.new_context(**kwargs)
+    await context.add_init_script(
+        "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    )
+    return context
 
 
 async def _load_captcha_page(page: Page, url: str, sitekey: str) -> None:
@@ -67,18 +88,21 @@ async def _load_captcha_page(page: Page, url: str, sitekey: str) -> None:
 
     await page.route(url, serve)
     await page.goto(url)
+    await asyncio.sleep(2)
 
 
 async def _open_audio_challenge(page: Page) -> None:
     anchor = page.frame_locator('iframe[src*="recaptcha/api2/anchor"]')
-    await anchor.locator("#recaptcha-anchor").click()
+    await anchor.locator("#recaptcha-anchor-label").click()
+    await asyncio.sleep(2)
     bframe = page.frame_locator('iframe[src*="recaptcha/api2/bframe"]')
     await bframe.locator("#recaptcha-audio-button").click()
+    await asyncio.sleep(2)
 
 
 async def _download_audio(page: Page) -> bytes:
     bframe = page.frame_locator('iframe[src*="recaptcha/api2/bframe"]')
-    audio_url = await bframe.locator("audio#audio-source").get_attribute("src")
+    audio_url = await bframe.locator("#audio-source").get_attribute("src")
     response = await page.context.request.get(audio_url)
     return await response.body()
 
@@ -86,7 +110,9 @@ async def _download_audio(page: Page) -> bytes:
 async def _submit_answer(page: Page, answer: str) -> str | None:
     bframe = page.frame_locator('iframe[src*="recaptcha/api2/bframe"]')
     await bframe.locator("#audio-response").fill(answer)
+    await asyncio.sleep(1)
     await bframe.locator("#recaptcha-verify-button").click()
+    await asyncio.sleep(2)
     try:
         await page.wait_for_function(
             "() => document.querySelector('textarea[name=\"g-recaptcha-response\"]').value.length > 0",
